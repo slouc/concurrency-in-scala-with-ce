@@ -593,6 +593,9 @@ Note that we could prevent Future from yielding all the time by using a non-shif
 
 You can think of Scala Future as being "fairness opt-out" and IO "fairness opt-in".
 
+Quick side note: When a cancellation command has been issued for some running `IO`, it can only be cancelled at two particular points, and one such point is inserted by the library on every 512 flatMaps in the run loop stack. 
+The other one is at the asynchronous boundary (see [Context shift](#context-shift) section).
+
 ### Cooperative yielding
 
 The relationship between fibers and threads is the following:
@@ -613,7 +616,8 @@ In cats-effect 2, cooperative yielding is controlled via `ContextShift`.
 Note that `ContextShift` is most likely going to be removed in cats-effect 3; see [cats-effect 3](#cats-effect-3) section.
 However, core principles explained here are useful to understand, because they will still be relevant in the next version)
 
-In cats-effect, submitting the fiber to a thread pool is done via `ContextShift` type. It has two main abilities: to run the continuation on some `ExecutionContext`, and to shift it to a different `ExecutionContext`.
+In cats-effect, submitting the fiber to a thread pool is done via `ContextShift` type. 
+It has two main abilities: to run the continuation on some `ExecutionContext`, and to shift it to a different `ExecutionContext`.
 
 Here's the trait:
 
@@ -638,7 +642,16 @@ def shift(implicit cs: ContextShift[IO]): IO[Unit]
 def shift(ec: ExecutionContext): IO[Unit]
 ```
 
-These two methods are similar in nature - they both shift to the desired thread pool, one by providing the Scala's `ExecutionContext`, the other one by providing a `ContextShift`. It is recommended to use `ContextShift` by default, and to provide `ExecutionContext` only when you need fine-grained control over the thread pool in use. Note that you can simply provide the same `ContextShift` / `ExecutionContext` that you're already running on, which will have the effect of cooperatively yielding to other fibers on the same thread pool, same as `shift` from the type class (you can even invoke it simply as `IO.shift`, as long as you have your `ContextShift` available implicitly). 
+These two methods are similar in nature - they both shift to the desired thread pool, one by providing the Scala's `ExecutionContext`, the other one by providing a `ContextShift`. 
+It is recommended to use `ContextShift` by default, and to provide `ExecutionContext` only when you need fine-grained control over the thread pool in use. 
+Note that you can simply provide the same `ContextShift` / `ExecutionContext` that you're already running on, which will have the effect of cooperatively yielding to other fibers on the same thread pool, same as `shift` from the type class 
+(you can even invoke it simply as `IO.shift`, as long as you have your `ContextShift` available implicitly). 
+
+So, just to repeat, `ContextShift` can perform a "shift" which either moves the computation to a different thread pool or sends it to the current one for re-scheduling.
+Point at which the shift happens is often referred to as *asynchronous boundary*. 
+Concept of asynchronous boundary has been described in the [Asynchronous boundary](#asynchronous-boundary) section, and now it has been re-introduced in the cats-effect context.
+
+Asynchronous boundary is one of two places at which an `IO` can be cancelled (the other one is every 512 flatMaps in the run loop; see the [Run loop](#run-loop) section).
 
 ### Examples
 
