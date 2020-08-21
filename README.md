@@ -997,7 +997,7 @@ Here are some examples:
 - Cats-effect documentation: https://typelevel.org/cats-effect/  
 - Cats-effect repo: https://github.com/typelevel/cats-effect
 - Cats-effect 3 proposal: https://github.com/typelevel/cats-effect/issues/634
-- Monix Task documentation: https://monix.io/docs/2x/eval/task.html  
+- Monix Task documentation: https://monix.io/docs/current/eval/task.html  
 - Fabio Labella - How do Fibers work: https://www.youtube.com/watch?v=x5_MmZVLiSM  
 - Pawel Jurczenko - Modern JVM Multithreading: https://pjurczenko.github.io/modern-jvm-multithreading.html 
 - Bartłomiej Szwej - Composable resource management in Scala: https://medium.com/@bszwej/composable-resource-management-in-scala-ce902bda48b2
