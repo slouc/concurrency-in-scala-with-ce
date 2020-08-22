@@ -303,7 +303,7 @@ def async[A](k: AsyncProcess): F[A]
 For example, if method `fromFuture` weren't already [implemented](https://github.com/typelevel/cats-effect/blob/dd8607baed11da140688d24e467ce76159517910/core/shared/src/main/scala/cats/effect/internals/IOFromFuture.scala#L28) for `IO`, we could implement it as:
 
 ```
-def fromFuture[A](future: Future[A]): IO[A] =
+def fromFuture[A](future: => Future[A]): IO[A] =
 Async[IO].async { cb =>
   future.onComplete {
     case Success(a) => cb(Right(a))
