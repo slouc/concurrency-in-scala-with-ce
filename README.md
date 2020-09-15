@@ -197,7 +197,7 @@ A somewhat different definition is that `IO` consists of two things:
 ### Synchronous methods
 
 Here are several ways of producing synchronous `IO` values in a "static" way:
-```
+```scala
 object IO {
   ...
   def pure[A](a: A): IO[A]
@@ -209,7 +209,7 @@ object IO {
 
 There is one more important method that we will be using heavily, but this one is not static; it's defined as a class method on values of type `IO`:
 
-```
+```scala
 class IO[A] {
   ...
   def start(implicit cs: ContextShift[IO]): IO[Fiber[IO, A]]
@@ -232,7 +232,7 @@ Note that `IO.apply` calls `IO.delay`, which means we can call `delay` using the
 
 Method `suspend` also suspends a synchronous side effect and it also comes from [Sync](https://typelevel.org/cats-effect/typeclasses/sync.html), but this time it's an effect that produces an `IO`.
 Note that:
-```
+```scala
 IO.pure(x).flatMap(f) <-> IO.suspend(f(x))
 ```
 
@@ -243,7 +243,7 @@ Most common usage of the term FFI is to serve as a translation layer between dif
 
 Translating such operations into `IO` world is done primarily via the following two methods:
 
-```
+```scala
 object IO {
   ...
   def async[A](k: (Either[Throwable, A] => Unit) => Unit): IO[A] 
@@ -260,7 +260,7 @@ It comes from the [Async](https://typelevel.org/cats-effect/typeclasses/async.ht
 
 Its signature is:
 
-```
+```scala
 def async[A](k: (Either[Throwable, A] => Unit) => Unit): F[A]
 ```
 
@@ -272,7 +272,7 @@ Let's say that there is some callback-based method `fetchUser` which retrieves a
 The user of this method will provide a callback which will do something with the received user or react to the received error. 
 Fetching method and its callback could look something like this:
 
-```
+```scala
 def fetchUser(userId: UserId): Future[User]
 def callback(result: Try[User]): Unit
 ```
@@ -283,7 +283,7 @@ We say that `onComplete` models an operation that happens on the other side of t
 
 Let's use `onComplete` to implement a helper function that, given a `Future`, provides us with a synchronous model of the underlying asynchronous process:
 
-```
+```scala
 def asyncFetchUser(fetchResult: Future[User])(callback: Try[User] => Unit): Unit =
   fetchResult.onComplete(callback)
 ```
@@ -293,21 +293,21 @@ We can say that `onComplete` is a method for providing a *description* (or a mod
 So finally, what `Async` gives us is a method from such a description to an effect type `F`, in our case `IO`.
 We could therefore explain the signature of `async` with the following simplification:
 
-```
+```scala
 def async[A](k: (Either[Throwable, A] => Unit) => Unit): F[A]
 ```
 translates to
-```
+```scala
 def async[A](k: Callback => Unit): F[A]
 ```
 which further translates to
-```
+```scala
 def async[A](k: AsyncProcess): F[A]
 ```
 
 For example, if method `fromFuture` weren't already [implemented](https://github.com/typelevel/cats-effect/blob/dd8607baed11da140688d24e467ce76159517910/core/shared/src/main/scala/cats/effect/internals/IOFromFuture.scala#L28) for `IO`, we could implement it as:
 
-```
+```scala
 def fromFuture[A](future: => Future[A]): IO[A] =
   Async[IO].async { cb =>
     future.onComplete {
@@ -342,7 +342,7 @@ This value is of type `IO[Unit]`, declared in the signature by using the type al
 
 It's important to emphasize that `cancelable` does not produce an `IO` that is cancelable by the user.
 You cannot say:
-```
+```scala
 val io = IO.cancelable(...)
 io.cancel // or something like that
 ```
@@ -352,7 +352,7 @@ So, it allows us to model asynchronous computations in the same fashion that `as
 For example, such asynchronous computation could be a running thread, a database connection, a long poll to some HTTP API etc., and by using `cancelable` we can translate that foreign computation into `IO` world and define what should happen if that computation "dies" (e.g. somebody kills the database connection).
 
 This is how we could modify our previous `async` example to include the cancelation feature:
-```
+```scala
 def fromFutureCancelable[A](future: => Future[A]): IO[A] =
   IO.cancelable { cb =>
     future.onComplete {
@@ -375,7 +375,7 @@ Cats effect model resource handling via [Resource](https://typelevel.org/cats-ef
 
 Here's an example (pretty much c/p-ed from the Cats website):
 
-```
+```scala
 def mkResource(s: String): Resource[IO, String] = {
   val acquire = IO(println(s"Acquiring $s")) *> IO.pure(s)
   def release(s: String) = IO(println(s"Releasing $s"))
@@ -408,7 +408,7 @@ As you can see, `Resource` takes care of the LIFO (Last-In-First-Out) order of a
 
 If something goes wrong, `Resource`s are released:
 
-```
+```scala
 val r = for {
   outer <- mkResource("outer")
   _ <- Resource.liftF(IO.raiseError(new Throwable("Boom!")))
@@ -422,7 +422,7 @@ Releasing outer
 java.lang.Throwable: Boom!
 ```
 and
-```
+```scala
 val r = for {
   outer <- mkResource("outer")
   inner <- mkResource("inner")
@@ -465,7 +465,7 @@ I want to explicitly point out that fiber in Scala is a **concept**, not some na
 This also means that there might be some minor differences in implementation across those libraries (e.g. compare [Cats-Effect](https://typelevel.org/cats-effect/datatypes/fiber.html) with [ZIO](https://zio.dev/docs/overview/overview_basic_concurrency#fibers)).
 
 Let's see some code: in Cats-Effect, fiber is a construct with `cancel` and `join`:
-```
+```scala
 trait Fiber[F[_], A] {
   def cancel: F[Unit]
   def join: F[A]
@@ -485,7 +485,7 @@ It is also perfectly possible to describe the whole `IO` program without ever in
 
 Here is some very simple code that demonstrates how `IO` describes side effects and runs them on a single fiber (there will be more examples in the [ContextShift](#contextshift) section):
 
-```
+```scala
 import cats.effect.{ExitCode, IO, IOApp}
 
 object MyApp extends IOApp {
@@ -508,7 +508,7 @@ For-comprehension is working on `IO` layer; we could flatMap `io1` into a bunch 
 
 Now let's see what happens if we want to run some `IO` on a separate fiber:
 
-```
+```scala
 ...
 val program2 = for {
   fiber <- io(1).start
@@ -524,7 +524,7 @@ It's important to realize which exact instructions in the example above get exec
 
 As a small exercise, try adding a small sleep to method `io`:
 
-```
+```scala
 def io(i: Int): IO[Unit] = IO({
   Thread.sleep(3000)
   println(s"Hi from $i!")
@@ -559,7 +559,7 @@ Run loop needs access to two JVM resources:
 Run loop builds up a stack of tasks to be performed. 
 We could model the stack in Scala code like this:
 
-```
+```scala
 sealed trait IO[+A]
 case class FlatMap[B, +A](io: IO[B], k: B => IO[A]) extends IO[A]
 case class Pure[+A](v: A) extends IO[A]
@@ -567,7 +567,7 @@ case class Delay[+A](eff: () => A) extends IO[A]
 ```
 
 Now, let's say we have the following program:
-```
+```scala
 val program = for {
   _ <- IO(println(s"What's up?"))
   input <- IO(readLine)
@@ -576,7 +576,7 @@ val program = for {
 ```
 
 Run loop stack for that program would then look something like this:
-```
+```scala
 FlatMap(
   FlatMap(
     Delay(() => print("What's up?")),
@@ -629,7 +629,7 @@ It has two main abilities: to run the continuation on some `ExecutionContext`, a
 
 Here's the trait:
 
-```
+```scala
 trait ContextShift[F[_]] {
   def shift: F[Unit]
   def evalOn[A](ec: ExecutionContext)(f: F[A]): F[A]
@@ -645,7 +645,7 @@ Don't confuse `shift` from `ContextShift` with `IO.shift`.
 The semantics are the same, but they come in slightly different forms. 
 `IO` version has the following two overloads of `shift` method:
 
-```
+```scala
 def shift(implicit cs: ContextShift[IO]): IO[Unit]
 def shift(ec: ExecutionContext): IO[Unit]
 ```
@@ -670,7 +670,6 @@ Method `shift` will be demonstrated on two examples.
 First, we will use a thread pool with only one thread, and we will start two fibers on that thread. 
 Note that I'm removing some boilerplate to save space (`IOApp` etc.), but you can find the full code in the repository.
 Also note that `Executors.newSingleThreadExecutor` and `Executors.newFixedThreadPool(1)` are two alternative ways of declaring the same thing. I will use the latter, simply to keep the consistency with examples that use multi-threaded pools.
-
 ```
 val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 val cs: ContextShift[IO] = IO.contextShift(ec)
@@ -699,8 +698,8 @@ Code is pretty straightforward - we have a recursive loop that goes on forever, 
 
 What gets printed out when we run the above program is an endless stream of "A", because first fiber never shifts (that is, never cooperatively yields) so the second fiber never gets a chance to run.
 
-Now let's add the shifting part to the above code snippet:
-```
+Now let's add the shifting to the above code snippet:
+```scala
 def loop(id: String)(i: Int): IO[Unit] = for {
   _ <- IO(printThread(id))
   _ <- IO.shift(cs) // <--- now we shift!
@@ -747,7 +746,7 @@ So even if there's only one fiber running on the thread pool, that doesn't mean 
 
 In the second example, we will have the same two fibers, but this time each fiber will get its own thread pool with a single thread.
 
-```
+```scala
 val ec1 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 val ec2 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 
@@ -782,7 +781,7 @@ We would have observed the same behaviour if we had used a single pool with two 
 
 Now, pay attention to the shift that happens on the 10th iteration:
 
-```
+```scala
 ...
   _ <- if (i == 10) IO.shift(cs1) else IO.unit
 ...
@@ -811,7 +810,7 @@ What do you think happens if we swap `IO` for a `Future` in the cases we saw ear
 
 Let's start with the single threaded example:
 
-``````
+```scala
 implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 
 def printThread(id: String) = Future {
@@ -832,7 +831,7 @@ val program = for {
 } yield ExitCode.Success
 
 Await.result(program, Duration.Inf)
-``````
+```
 As expected, this prints out `[pool-1-thread-1] A` indefinitely.
 
 But what happens if we now change to `Executors.newFixedThreadPool(2)`?
@@ -852,7 +851,7 @@ Note how threads are still taking turns, but they are both are executing "A".
 Why does this happen?
 
 On every `flatMap` call (`map` too), `Future` needs to have access to the `ExecutionContext`:
-```
+```scala
 def flatMap[S](f: T => Future[S])(implicit executor: ExecutionContext): Future[S]
 ```
 In every step of the for-comprehension, `Future` will dispatch its computation back to our two-threaded pool (note: I heard that implementation of `Future` might change in this regard and that calls to `ExecutionContext` are going to be "batched" to improve performance, but I couldn't find any official source for this at the time of writing). 
@@ -876,7 +875,7 @@ Note that we would have observed the same behaviour using `IO` if we hadn't star
 In real world scenarios, you want to join started fibers when you're done with them (unless you cancel them).
 But there's a lurking danger if you're using multiple fibers:
 
-```
+```scala
 val f1 = for {
   f1 <- IO(Thread.sleep(1000)).start
    _ <- f1.join
@@ -902,7 +901,7 @@ In the [Resource handling](#resource-handling) section, one such mechanism has b
 
 Here is an example of using that mechanism to assure safety upon fiber cancelation:
 
-```
+```scala
 def safeStart[A](id: String)(io: IO[A]): Resource[IO, Fiber[IO, A]] =
   Resource.make(io.start)(fiber => fiber.cancel >> IO(println(s"Joined $id")))
 
@@ -956,7 +955,7 @@ This is explained further in point 3.
 3. `Async` type class will now hold a reference to the running `ExecutionContext`.
 This will enable fallback to the parent `ExecutionContext` once a fiber has terminated. 
 Consider the following Cats-Effect 2 code:
-    ```
+    ```scala
     val ec1 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
     val ec2 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
     val ec3 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
