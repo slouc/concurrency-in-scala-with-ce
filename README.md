@@ -1,6 +1,6 @@
 # Concurrency In Scala with Cats-Effect
 
-This text serves as an introduction to the topic of concurrent asynchronous effects in Scala, based on the [cats-effect](https://typelevel.org/cats-effect/) library. 
+This text serves as an introduction to the topic of concurrent asynchronous effects in Scala, based on the [Cats-Effect](https://typelevel.org/cats-effect/) library. 
 
 However, many of the concepts presented here are applicable not only to other Scala effect libraries as well, but also to any system or programming language that deals with concurrency and asynchronous programming.
 
@@ -8,7 +8,7 @@ Note:
 It should be pointed out that the intention of the text is not to provide a "better documentation". 
 First, because existing material on the subject is pretty good already (you can find some links in the [References](#references) section), and secondly, because I don't consider myself anything remotely near being an expert in the field. These are simply my notes that I kept while I was exploring the topic, and that I'm willing to share with whomever might find them useful.
 
-All code snippets are based on cats-effect 2, since cats-effect 3 wasn't yet out at the time of writing this text.
+All code snippets are based on Cats-Effect 2, since Cats-Effect 3 wasn't yet out at the time of writing this text.
 
 ## Table of Contents
 
