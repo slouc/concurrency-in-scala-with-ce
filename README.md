@@ -18,8 +18,8 @@ All code snippets are based on cats-effect 2, since cats-effect 3 wasn't yet out
   - [Threads and thread pools](#threads-and-thread-pools)
   - [Java Executors](#java-executors)
   - [Scheduling and ExecutionContext](#scheduling-and-executioncontext)
-- [Cats IO basics](#cats-io-basics)
-  - [Introduction](#introduction)
+- [Cats-Effect IO basics](#cats-effect-io-basics)
+  - [Overview](#overview)
   - [Synchronous methods](#synchronous-methods)
   - [Asynchronous methods (FFI)](#asynchronous-methods-ffi)
   - [Resource handling](#resource-handling)
@@ -33,7 +33,7 @@ All code snippets are based on cats-effect 2, since cats-effect 3 wasn't yet out
   - [IO vs Future](#io-vs-future)
   - [Leaking fibers](#leaking-fibers)
   - [Summary](#summary)
-- [Cats-effect 3](#cats-effect-3)
+- [Cats-Effect 3](#cats-effect-3)
 - [Fibers outside of Scala](#fibers-outside-of-scala)
   - [Project Loom](#project-loom)
   - [Green threads](#green-threads)
@@ -71,19 +71,19 @@ Concurrency means that a single logical thread can have its tasks distributed ac
 
 In order to be able to do so, we have to use asynchronous operations. Once the task has been initiated, it crosses the *asynchronous boundary*, and it resumes somewhere else.
 
-There are a couple of somewhat famous quotes:
+Here are a couple of famous related quotes:
 
-> "A Future represents a value, detached from time" - Viktor Klang ([link](https://monix.io/docs/2x/eval/task.html#comparison-with-scalas-future))
+> "A Future represents a value, detached from time" - Viktor Klang ([link](https://monix.io/docs/current/eval/task.html#comparison-with-scalas-future))
 
 > "Asynchronous process is a process that continues its execution in a different place or time than the one it started in" - Fabio Labella ([link](https://www.youtube.com/watch?v=x5_MmZVLiSM&t=6m35s))
 
 > "A logical thread offers a synchronous interface to an asynchronous process" - Fabio Labella ([link](https://www.youtube.com/watch?v=x5_MmZVLiSM&t=11m12s))
 
-Bear in mind that saying "synchronous interface" comes from the fact that all our code is basically synchronous. We write commands one after another and they are executed one after another. So when you see a term "synchronous code", pay attention to the context - maybe someone meant "code that doesn't use asynchronous effects (e.g. it blocks on every asynchronous call)". In this text, however, "synchronous code" means just any code, because all code we write is in nature synchronous. It is via usage of asynchronous effects in our code that we get to cross the asynchronous boundary and model asynchronously executed operations.
+All of the above quotes revolve around the same concept of asynchronous boundary; after our computation passes that boundary, we cannot be sure *when* it will be finished, which is why we should not block while waiting for it. We're also not sure *where* it will be finished - another OS thread, another node in our physical network, somewhere in the cloud etc. This text deals with the details of execution on OS threads (hence the relevance of the third quote), and it will not touch upon any other scenario of asynchronous execution, such as distributing the tasks over nodes in a cluster.
 
-All of the above quotes revolve around the same concept of asynchronous boundary; after our computation passes that boundary, we cannot be sure *when* is it going to be finished, which is why we should not block while waiting for it. We're also not sure *where* is it going to be finished - another OS thread, another node in our physical network, somewhere in the cloud etc. This text deals with the details of execution on OS threads (hence the relevance of the third quote), and it will not touch upon any other scenario of asynchronous execution, such as distributing the tasks over nodes in a cluster.
+Speaking of third quote, bear in mind that saying "synchronous interface" comes from the fact that all our code is basically synchronous. We write commands one after another and they are executed one after another. So when you see a term "synchronous code", pay attention to the context - maybe someone meant "code that doesn't use asynchronous effects (e.g. it blocks on every asynchronous call)". In this text, however, "synchronous code" means just any code, because all code we write is in nature synchronous. It is via usage of asynchronous effects in our code that we get to cross the asynchronous boundary and model asynchronously executed operations.
 
-When we take a look at how each task is executed by OS thread(s), we can see the importance of concurrency. 
+Let's see how tasks are executed by OS threads (each letter-number combination represents one task):
 
 ![sync-async](sync-async-boundary.png)
 
@@ -93,13 +93,14 @@ After crossing the asynchronous boundary, the tasks get interleaved across threa
 
 ### Threads and thread pools
 
-Threads in JVM map 1:1 to the operating system’s native threads. 
-When CPU stops executing one thread and starts executing another thread, the OS needs to store the state of the earlier task and restore the state for the current one. 
+JVM threads map 1:1 to the operating system’s native threads. 
+When CPU stops executing one thread and starts executing another thread, OS needs to store the state of the earlier task and restore the state for the current one. 
 This context switch is expensive and sacrifices *throughput*. 
-In ideal world we would have a fixed number of tasks and at least the same number of CPU threads; then every task would run on its own thread and throughput would be maximal, because context switches wouldn't exist. 
+In ideal world we would have a fixed number of tasks and at least the same number of CPU threads; then every task would run on its own dedicated thread and throughput would be maximal, because context switches wouldn't exist. 
+
 However, in the real world there are things to consider:
-- there will be external requests from the outside that need to be served
-- even if there are no external requests, no I/O etc. (e.g. mining bitcoin), some work-stealing is bound to happen anyway, for example garbage collector on the JVM 
+- There will be external requests from the outside that need to be served
+- Even if there are no external requests and no I/O (e.g. we're just mining bitcoin), some work-stealing is bound to happen anyway, for example JVM's garbage collector
 
 This is why it's useful to sacrifice some throughput to achieve *fairness*. High fairness makes sure that all tasks get their share of the CPU time and no task is left waiting for too long.
 
@@ -115,22 +116,22 @@ These three types of operations require significantly different thread pools to 
   - Bounded pool with a very low number of threads (maybe even just one), with a very high priority. These threads will basically just sit idle most of the time and keep polling whether there is a new async IO notification. Time that these threads spend processing a request directly maps into application latency, so it's very important that no other work gets done in this pool apart from receiving notifications and forwarding them to the rest of the application. 
   
 - Blocking asynchronous operations:  
-  - Unbounded cached pool. Unbounded because blocking operation can (and will) block a thread for some time, and we want to be able to serve other I/O requests in the meantime. Cached because we could run out of memory by creating too many threads, so it’s important to enable reusing of existing threads.
+  - Unbounded cached pool. Unbounded because blocking operation can (and will) block a thread for some time, and we want to be able to serve other I/O requests in the meantime. Cached because we could run out of memory by creating too many threads, so it’s important to reuse existing threads.
   
 - CPU-heavy operations:  
-  - Fixed pool with number of threads = number of CPU cores. This is pretty straightforward. Back in the day the "golden rule" was number of threads = number of CPU cores + 1, but "+1" was coming from the fact that one extra thread was always reserved for I/O (as explained above, now we have separate pools for that).
+  - Fixed pool in which number of threads equals the number of CPU cores. This is pretty straightforward. Back in the day the "golden rule" was number of threads = number of CPU cores + 1, but "+1" was coming from the fact that one extra thread was always reserved for I/O (as explained above, we now have separate pools for that).
 
 Remember: whenever you are in doubt over which thread pool best suits your needs, optimal solution is to benchmark.
 
 ### Java Executors
 
-In Java, thread pools are modeled through `Executor` / `ExecutorService` interface. The difference is that the latter provides termination capabilities and some utility functions.
+In Java, thread pools are modeled through `Executor` / `ExecutorService` interface. The latter provides termination capabilities and some utility functions.
 
 Two most commonly used `Executor` implementations are: 
-- Java 5 [ThreadPoolExecutor](https://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ThreadPoolExecutor.html): 
+- [ThreadPoolExecutor](https://docs.oracle.com/javase/7/docs/api/java/util/concurrent/ThreadPoolExecutor.html) introduced in Java 5:  
   Thread pool that executes each submitted task using one of possibly several pooled threads.
   
-- Java 7 [ForkJoinPool](https://docs.oracle.com/javase/tutorial/essential/concurrency/forkjoin.html):
+- [ForkJoinPool](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ForkJoinPool.html) introduced in Java 7:  
   Work-stealing thread pool that tries to make use of all your CPU cores by splitting up larger chunks of work and assigning them to multiple threads. 
 If one of the threads finishes its work, it can steal tasks from other threads that are still busy. 
 You can set the number of threads to be used in the pool, bounded by some configured minimum and maximum.
@@ -142,59 +143,60 @@ Utility methods for obtaining various `Executor` implementations are available i
 Here are some recommendations on which implementation to use for each of the scenarios described earlier:
 
 - Non-blocking asynchronous operations:  
-  - `newFixedThreadPool`
+  - `Executors.newFixedThreadPool`
   
 - Blocking asynchronous operations:  
-  - `newCachedThreadPool`
+  - `Executors.newCachedThreadPool`
 
 - CPU-heavy operations:  
-  - For many small tasks: `new ForkJoinPool`  
-  - For long-running tasks: `newFixedThreadPool`  
+  - For long-running tasks: `Executors.newFixedThreadPool`  
+  - For many small tasks: `new ForkJoinPool` (not available in `Executors`)  
 
 ### Scheduling and ExecutionContext
 
-Now that the thread pools are set up, we are ready to start submitting tasks to their respective thread pools. In our program, we will simply submit a task for execution, and it will get executed at some point when it's assigned a thread. This assignment is done by the *scheduler*.
+Now that the thread pools are set up, we are ready to start submitting tasks to them. 
+In our program, we will simply submit a task for execution, and it will get executed at some point when it's assigned to a thread. 
+This assignment is done by the *scheduler*.
 
 There are two ways scheduling can be achieved:
 
 - Preemptive scheduling:  
   Scheduler suspends the currently running task in order to execute another one
-- Cooperative scheduling (or cooperative yielding):  
+- Cooperative scheduling (or "cooperative yielding"):  
   Tasks suspend themselves, meaning that the currently running task at some point voluntarily suspends its own execution, so that the scheduler can give the thread to other tasks
 
-The role of the scheduler is played by the `ExecutionContext` ([docs](https://docs.scala-lang.org/overviews/core/futures.html#execution-context)). Every `ExecutionContext` schedules threads within one assigned thread pool.
+Role of the scheduler is played by the `ExecutionContext` ([docs](https://docs.scala-lang.org/overviews/core/futures.html#execution-context)). 
+Every `ExecutionContext` schedules threads only within its assigned thread pool.
 
-In Scala, there is one global `ExecutionContext`, available as `ExecutionContext.global`. 
-Global EC is backed by the `ForkJoinPool`.
+In Scala, there is one global `ExecutionContext`. 
+It is backed by the `ForkJoinPool` and it is available as `ExecutionContext.global`.
 
 Whichever underlying Java executor you rely on, your level of granularity is going to be threads. 
 Threads don't cooperate. 
 They execute their given set of commands, and the operating system makes sure that they all get some chunk of the CPU time. That's why I can be typing this text, listening to music and compiling some code, all at the same time.
 
-So, in order to allow tasks submitted to the `ExecutionContext` to use the principle of cooperative yielding, we have to explore the concept of **fibers**.
-Later we will also look at cooperative yielding [into more detail](#io).
-Note that fibers belong to a more general concept of [green threads](#green-threads) which share cooperative yielding as one of the characteristics.
+So, in order to allow tasks submitted to the `ExecutionContext` to use the principle of cooperative yielding, we have to explore the concept of **fibers**, which belong to a more general concept of [green threads](#green-threads).
 
-## Cats IO basics
+We will explore fibers and cooperative yielding in [later sections](#fibers), but before we do that, we need to become familiar with some programming constructs from the Cats-Effect library.
 
-### Introduction
+## Cats-Effect IO basics
+
+### Overview
 
 Type `IO` ([docs](https://typelevel.org/cats-effect/datatypes/io.html)) is used for encoding side effects as pure values. 
-In other words, it allows us to model the operations from the other side of asynchronous boundary in our synchronous code. 
+In other words, it allows us to model operations from the other side of asynchronous boundary in our synchronous code. 
 
 There are two main groups of `IO` values - those that model:
 - synchronous computations
 - asynchronous computations
 
-A somewhat different definition of `IO` capabilities is that it contains:
-- an FFI for side-effectful asynchronous functions (e.g. `async` and `cancelable`; see section [Asynchronous methods (FFI)](#asynchronous-methods-ffi))
-- combinators defined either directly inside `IO` or coming from type classes (`pure`, `map`, `flatMap`, `delay`, `start` etc.)
+A somewhat different definition is that `IO` consists of two things:
+- FFI (Foreign Function Interface) for side-effectful asynchronous functions; see section [Asynchronous methods (FFI)](#asynchronous-methods-ffi)). Examples: `async` and `cancelable`.
+- Combinators defined either directly inside `IO` or coming from type classes. Examples: `pure`, `map`, `flatMap`, `delay`, `start` etc.
 
 ### Synchronous methods
 
-Most common methods for modeling synchronous computations using `IO` are:
-
-Here are several ways of producing `IO` values in a "static" way:
+Here are several ways of producing synchronous `IO` values in a "static" way:
 ```
 object IO {
   ...
@@ -218,16 +220,17 @@ class IO[A] {
 **Pure:**
 
 Wraps an already computed value into `IO` context, for example `IO.pure(42)`.
-It comes from the [Applicative](https://typelevel.org/cats/typeclasses/applicative.html) type class (note: from [cats](https://typelevel.org/cats/), not cats-effect).
+Comes from the [Applicative](https://typelevel.org/cats/typeclasses/applicative.html) type class (note: from [Cats](https://typelevel.org/cats/), not Cats-Effect).
 
 **Delay:**
 
-We will be using `delay / apply`, in the form of `IO(value)` which desugars into `IO.apply(value)`. 
-It comes from the [Sync](https://typelevel.org/cats-effect/typeclasses/sync.html) type class and is used for suspension of synchronous side effects
+Used for suspension of synchronous side effects. 
+Comes from the [Sync](https://typelevel.org/cats-effect/typeclasses/sync.html) type class.
+Note that `IO.apply` calls `IO.delay`, which means we can call `delay` using the shorthand form `IO(value)`. 
 
 **Suspend:**
 
-Method `suspend` also comes from [Sync](https://typelevel.org/cats-effect/typeclasses/sync.html), hence it also suspends a synchronous side effect, but this time it's an effect that produces an `IO`.
+Method `suspend` also suspends a synchronous side effect and it also comes from [Sync](https://typelevel.org/cats-effect/typeclasses/sync.html), but this time it's an effect that produces an `IO`.
 Note that:
 ```
 IO.pure(x).flatMap(f) <-> IO.suspend(f(x))
@@ -236,9 +239,9 @@ IO.pure(x).flatMap(f) <-> IO.suspend(f(x))
 ### Asynchronous methods (FFI)
 
 `IO` also serves as an FFI - a [Foreign Function Interface](https://en.wikipedia.org/wiki/Foreign_function_interface). 
-Most common usage of the term FFI is to serve as a translation layer between different programming languages, but `IO` translates side-effectful asynchronous Scala methods into pure, referentially-transparent values.
+Most common usage of the term FFI is to serve as a translation layer between different programming languages, but here the context is a bit different: `IO` translates side-effectful asynchronous Scala operations into pure, referentially-transparent values.
 
-Translating such operations into `IO` world is done primarily via these two methods:
+Translating such operations into `IO` world is done primarily via the following two methods:
 
 ```
 object IO {
@@ -251,28 +254,30 @@ object IO {
   
 **Async:**
  
-Method `async` is used for modeling asynchronous operations in our cats-effect code.
+Method `async` is used for modeling asynchronous operations in our Cats-Effect code.
 
-It comes from the `Async` [type class](https://typelevel.org/cats-effect/typeclasses/async.html):
+It comes from the [Async](https://typelevel.org/cats-effect/typeclasses/async.html) type class.
+
+Its signature is:
 
 ```
 def async[A](k: (Either[Throwable, A] => Unit) => Unit): F[A]
 ```
 
-(Note: in cats-effect 3, `Async` will [contain more methods](https://github.com/typelevel/cats-effect/issues/634))
+(Note: in [Cats-Effect 3]((https://github.com/typelevel/cats-effect/issues/634)), `Async` will contain more methods)
 
-It provides us with a way to describe an asynchronous operation (that is, operation that happens on the other side of asynchronous boundary) in our synchronous code.
+Method `async` provides us with a way to describe an asynchronous operation (that is, operation that happens on the other side of an asynchronous boundary) in our synchronous code.
 
-Let's say that there is some callback-based method `fetchUser` which queries for some user in a database and possibly returns an error in case something went wrong (e.g. connection to the database is closed). 
-The user of this method will provide a callback which will do something with the user and react to error, if it happens. 
-They could look something like this:
+Let's say that there is some callback-based method `fetchUser` which retrieves an user from the database and possibly returns an error in case something went wrong. 
+The user of this method will provide a callback which will do something with the received user or react to the received error. 
+Fetching method and its callback could look something like this:
 
 ```
 def fetchUser(userId: UserId): Future[User]
 def callback(result: Try[User]): Unit
 ```
 
-How do we now model an asynchronous operation in synchronous code?
+How do we now model this asynchronous operation in synchronous code?
 That's what methods like `onComplete` are for (see [Future Scaladoc](https://www.scala-lang.org/api/current/scala/concurrent/Future.html)). 
 We say that `onComplete` models an operation that happens on the other side of the asynchronous boundary, and it serves as an interface to our synchronous code.
 
@@ -280,18 +285,18 @@ Let's use `onComplete` to implement a helper function that, given a `Future`, pr
 
 ```
 def asyncFetchUser(fetchResult: Future[User])(callback: Try[User] => Unit): Unit =
-fetchResult.onComplete(callback)
+  fetchResult.onComplete(callback)
 ```
 
 We can say that `onComplete` is a method for providing a *description* (or a model) of some asynchronous process by translating it across the asynchronous boundary to our synchronous code.
 
 So finally, what `Async` gives us is a method from such a description to an effect type `F`, in our case `IO`.
-We could therefore explain the signature of `async` with the following simplification in pseudocode:
+We could therefore explain the signature of `async` with the following simplification:
 
 ```
 def async[A](k: (Either[Throwable, A] => Unit) => Unit): F[A]
 ```
-which translates to
+translates to
 ```
 def async[A](k: Callback => Unit): F[A]
 ```
@@ -304,27 +309,26 @@ For example, if method `fromFuture` weren't already [implemented](https://github
 
 ```
 def fromFuture[A](future: => Future[A]): IO[A] =
-Async[IO].async { cb =>
-  future.onComplete {
-    case Success(a) => cb(Right(a))
-    case Failure(e) => cb(Left(e))
+  Async[IO].async { cb =>
+    future.onComplete {
+      case Success(a) => cb(Right(a))
+      case Failure(e) => cb(Left(e))
+    }
   }
-}
 ```
 
 We don't care about what callback `cb` really does. 
 That part is handled by the implementation of `async`.
-Purpose of `cb` is to provide users of `async` method with a way to signal that the asynchronous process has completed.
+Its purpose is to provide users of `async` method with a way of signaling that the asynchronous process has completed.
+"Here, call this when you're done".
 
 You can find the full code to play around with in the [code repository](https://github.com/slouc/concurrent-effects/blob/master/src/main/scala/FFI.scala).
-
-It comes from the [Async](https://typelevel.org/cats-effect/typeclasses/async.html) type class.
 
 **Cancelable:**
 
 Method `cancelable` is present in `IO`, just like `async`, and they have similar signatures. 
 Just like `async`, it creates an `IO` instance that executes an asynchronous process on evaluation. 
-But unlike `async`, which comes from the [Async](https://typelevel.org/cats-effect/typeclasses/async.html) type class, `cancelable` comes from [Concurrent](https://typelevel.org/cats-effect/typeclasses/concurrent.html) type class.
+But unlike `async`, which comes from [Async](https://typelevel.org/cats-effect/typeclasses/async.html) type class, `cancelable` comes from [Concurrent](https://typelevel.org/cats-effect/typeclasses/concurrent.html) type class.
 
 If you understand `async`, `cancelable` is simple. 
 The difference is:
@@ -345,25 +349,23 @@ io.cancel // or something like that
 Instead, what `cancelable` does is - it takes a foreign (meaning it comes from outside of our IO world)  asynchronous computation that is cancelable in its nature, and puts it in the `IO` context.
 So, it allows us to model asynchronous computations in the same fashion that `async` does, but with the extra ability to define an effect that will be executed if that asynchronous computation gets canceled.
 
-For example, such asynchronous computation could be a running thread, a database connection, a long poll to some HTTP API etc., and by using `cancelable` we can translate that foreign computation into `IO` world and define what should happen if that computation gets cancelled (e.g. somebody kills the database connection).
+For example, such asynchronous computation could be a running thread, a database connection, a long poll to some HTTP API etc., and by using `cancelable` we can translate that foreign computation into `IO` world and define what should happen if that computation "dies" (e.g. somebody kills the database connection).
 
 This is how we could modify our previous `async` example to include the cancelation feature:
 ```
 def fromFutureCancelable[A](future: => Future[A]): IO[A] =
-IO.cancelable { cb =>
-  future.onComplete {
-    case _ => // don't use the callback!
+  IO.cancelable { cb =>
+    future.onComplete {
+      case _ => // don't use the callback!
+    }
+    IO(println("Rollback the transaction!"))
   }
-  IO(println("Rollback the transaction!"))
-}
 ```
 Notice how we don't call the `cb` callback any more. 
-Remember, `cb` is used to denote the completion of the asynchronous computation that we are modelling.
-By not calling `cb`, we can emulate a long running operation (one that we have enough time to cancel).
+By not calling `cb`, we can emulate a long running operation, one that we have enough time to cancel (remember, `cb` is used to denote the completion of the asynchronous computation that we are modelling).
 
-If you run the [code](https://github.com/slouc/concurrent-effects/blob/master/src/main/scala/FFI.scala), you will see that the computation is running indefinitely.
-But once you kill the process, you will see the printout "Rollback the transaction!". 
-If you use `async` instead of `cancelable` (also provided in the code repository), you will notice that there is no transaction rollback printout.
+If you run the [code](https://github.com/slouc/concurrent-effects/blob/master/src/main/scala/FFI.scala), you will get an infinite computation that can be stopped by manually killing the process, which then shows "Rollback the transaction!". 
+If you use `async` instead of `cancelable` (also provided in the code repository), you will notice that there is no "Rollback the transaction!" line.
 
 ### Resource handling
 
@@ -371,7 +373,7 @@ Resource handling refers to the concept of acquiring some resource (e.g. opening
 
 Cats effect model resource handling via [Resource](https://typelevel.org/cats-effect/datatypes/resource.html) type.
 
-Here's an example (pretty much c/p-ed from the cats website):
+Here's an example (pretty much c/p-ed from the Cats website):
 
 ```
 def mkResource(s: String): Resource[IO, String] = {
@@ -389,7 +391,7 @@ override def run(args: List[String]): IO[ExitCode] =
   r.use { case (a, b) => IO(println(s"Using $a and $b")) }.map(_ => ExitCode.Success)
 ```
 
-For-comprehension that build `r` operates on the `Resource` level (hence, `Resource` is a monad).
+For-comprehension that builds the value `r` operates on the `Resource` layer (hence, `Resource` is a monad).
 We can easily compose multiple `Resource`s by flatmapping through them.
 
 The output of the above program is:
@@ -436,33 +438,33 @@ Releasing outer
 java.lang.Throwable: Boom!
 ```
 
-For more details on resource handling in cats-effect, refer to this [excellent blog post](https://medium.com/@bszwej/composable-resource-management-in-scala-ce902bda48b2).
+For more details on resource handling in Cats-Effect, refer to this [excellent blog post](https://medium.com/@bszwej/composable-resource-management-in-scala-ce902bda48b2).
 
 ## Fibers
 
 ### Definition
 
-You can think of fibers as lightweight threads which use cooperative scheduling, unlike actual threads which use preemptive scheduling. 
+You can think of fibers as lightweight threads which use cooperative scheduling, unlike real (OS and JVM) threads which use preemptive scheduling. 
+
+Also, fibers are managed in the user space, whereas real threads are managed in the kernel space.
 
 Note that in some contexts / languages fibers are also known as *coroutines*; "fiber" is usually used in the system-level context, while coroutines are used in the language-level context. 
 However, in Scala "fiber" is the preferred term.
-
-Unlike OS and JVM threads which are managed in the kernel space, fibers are managed in the user space.
 
 Fibers map to CPU / JVM threads many-to-few, similarly to how threads map to processes. 
 Multiple fibers can run on multiple thread pools, or on the same set of threads from one thread pool, or even on the same thread.
 In the case of a single thread, they will take turns executing their code using the available thread. 
 Depending on your code, as well as the library that you are using, you can decide to have them cooperate more often, thus achieving fairness, or to cooperate less often, thus sacrificing some fairness for more throughput (concepts of fairness and throughput have been [introduced earlier](#threads-and-thread-pools)).
 
-Fibers are much more lightweight: they consume much less memory, have growable and shrinkable stacks, and can be garbage collected. 
-Also, blocking a fiber doesn't block the underlying thread. 
-As a consequence of all that, we don't have to be as careful when creating new fibers as the upper limit is denoted by available memory. 
-On the other hand, when using threads, we're primarily constrained by the number of cores, but also other aspects.
+As mentioned earlier, fibers are lightweight: they consume much less memory than real threads, have growable and shrinkable stacks, and can be garbage collected. 
+Also, blocking a fiber doesn't block the underlying thread.
+As a consequence of all that, we don't have to be as careful when creating new fibers.
+On the other hand, when using threads, we're primarily constrained by the number of cores (but also other aspects).
 
-I want to explicitly point out that fiber in Scala is a **concept**, not some native resource like process or thread. Project [Loom](https://wiki.openjdk.java.net/display/loom/Main) (also see this [blogpost](https://blog.softwaremill.com/will-project-loom-obliterate-java-futures-fb1a28508232?gi=c5487dba95ec)) is aiming to introduce fibers as native JVM constructs, but until that happens, fibers in Scala will continue to be a manually-implemented thing. 
-This also means that they might have some minor differences in implementation across different libraries (e.g. [cats-effect](https://typelevel.org/cats-effect/datatypes/fiber.html) vs [ZIO](https://zio.dev/docs/overview/overview_basic_concurrency)).
+I want to explicitly point out that fiber in Scala is a **concept**, not some native resource like process or thread. Project [Loom](https://wiki.openjdk.java.net/display/loom/Main) (also see this [blogpost](https://blog.softwaremill.com/will-project-loom-obliterate-java-futures-fb1a28508232?gi=c5487dba95ec)) aims to introduce fibers as native JVM constructs, but in Cats-Effect and other libraries fibers are a manually-implemented thing. 
+This also means that there might be some minor differences in implementation across those libraries (e.g. compare [Cats-Effect](https://typelevel.org/cats-effect/datatypes/fiber.html) with [ZIO](https://zio.dev/docs/overview/overview_basic_concurrency#fibers)).
 
-In cats-effect, fiber is a construct with `cancel` and `join`:
+Let's see some code: in Cats-Effect, fiber is a construct with `cancel` and `join`:
 ```
 trait Fiber[F[_], A] {
   def cancel: F[Unit]
@@ -470,17 +472,18 @@ trait Fiber[F[_], A] {
 }
 ```
 
-Joining a fiber can be thought of as blocking for completion, but only on a semantic level. 
-Remember, blocking a fiber doesn't really block the underlying thread, since it can keep running other fibers. 
+Joining a fiber can be thought of as blocking for completion, but only on semantic level. 
+Remember, blocking a fiber doesn't really block the underlying thread, because the thread can keep running other fibers. 
 
-Program defined as `IO` value can be executed on a fiber. 
-`IO` type uses the method `start` (available as long as there is an implicit `ContextShift[IO]` defined) to start its execution on a fiber. `ContextShift` will be explained later; for now, think of it as cats-effect version of `ExecutionContext`. 
-It's basically a reference to the desired thread pool that should execute the fiber.
+A program defined as `IO` value can be executed on a fiber. 
+`IO` type uses the method `start` (available as long as there is an implicit `ContextShift[IO]` in the scope) to start its execution on a fiber. `ContextShift` will be explained later; for now, think of it as Cats-Effect version of `ExecutionContext`. 
+It's basically a reference to the desired thread pool that should execute the fiber. 
+Note that it is most likely going to be removed in Cats-Effect 3; see [cats-effect 3](#cats-effect-3) section.
 
 By using `start`, we can make two or more `IO`s run in parallel. 
-Note that it is also perfectly possible to describe the whole `IO` program without ever invoking `start`. This simply means that the whole `IO` program will run on a single fiber.
+It is also perfectly possible to describe the whole `IO` program without ever invoking `start`; this simply means that the whole `IO` program will run on a single fiber.
 
-Here is some very simple code that demonstrates how `IO` describes side effects and runs them on a single fiber (there will be more examples in the [ContextShift](#contextshift) section:
+Here is some very simple code that demonstrates how `IO` describes side effects and runs them on a single fiber (there will be more examples in the [ContextShift](#contextshift) section):
 
 ```
 import cats.effect.{ExitCode, IO, IOApp}
@@ -499,9 +502,9 @@ object MyApp extends IOApp {
 }
 ```
 
-You will notice that the main object extends `IOApp`. This is a very useful cats-effect trait that allows us to describe our programs as `IO` values, without having to actually run them manually by using `unsafeRunSync` or similar methods. Remember how we said earlier that invoking `start` on some `IO` requires an implicit instance of `ContextShift[IO]` in order to define the `ExecutionContext` (and hence the thread pool) to run on? Well, `IOApp` comes with a default `ContextShift` instance (which you can then override if you want to). This is why we didn't have to explicitly define any implicit `ContextShift[IO]` instance in our code. 
+You will notice that the main object extends `IOApp`. This is a very useful Cats-Effect trait that allows us to describe our programs as `IO` values, without having to actually run them manually by using `unsafeRunSync` or similar methods. Remember how we said earlier that invoking `start` on some `IO` requires an implicit instance of `ContextShift[IO]` in order to define the `ExecutionContext` (and hence the thread pool) to run on? Well, `IOApp` comes with a default `ContextShift` instance, which you can also override if you want to. This is why we didn't have to explicitly define any implicit `ContextShift[IO]` instance in our code. 
 
-For-comprehension is working on `IO` layer; we could flatMap `io1` into a bunch of other `IO`s, for example reading some stuff from the console, then displaying some more stuff, then doing an HTTP request, then talking to a database a bit, etc.
+For-comprehension is working on `IO` layer; we could flatMap `io1` into a bunch of other `IO`s, for example reading some stuff from the console, then displaying some more stuff, then doing an HTTP request, then talking to a database, etc.
 
 Now let's see what happens if we want to run some `IO` on a separate fiber:
 
@@ -515,7 +518,7 @@ val program2 = for {
 ...
 ```
 
-We define a chain of `IO`s, and then at some point we run some part of that chain on a separate fiber. That's the only difference from the previous program - parts where we `start` and `join` the fiber. Invoking `io1.start` produces an `IO[Fiber[IO, Unit]]`, which means we get a handle over the new fiber which we can then join later, or cancel it on error, or keep it running until some external mechanism tells us to cancel it, etc.
+We define a chain of `IO`s, and then at some point we run some part of that chain on a separate fiber. That's the only difference from the previous program - parts where we `start` and `join` the fiber. Invoking `io1.start` produces an `IO[Fiber[IO, Unit]]`, which means we get a handle over the new fiber which we can then join later (which means waiting for completion), or cancel it on error, or keep it running until some external mechanism tells us to cancel it, etc.
 
 It's important to realize which exact instructions in the example above get executed on which fiber. After we started the execution of `io1` on a separate fiber, everything we did afterwards was done in parallel to the original fiber. We say that the code captured in `io1` was the *source* for the new fiber.
 
@@ -533,24 +536,28 @@ If you now measure the execution time between `program1` and `program2`, you wil
 ### Continuations
 
 In the previous section, we have seen that fiber runs a set of instructions (the source). 
-Any `IO` can be run in a fiber as long as there is a `ContextShift` type class instance available for it.
-This is done by calling `.start` on it. It needs an instance of a `ContextShift` in order to know which thread pool to run the fiber on. 
+Any `IO` can be run on a fiber as long as there is a `ContextShift` type class instance available for it.
+This is done by calling `.start` on it, which needs an instance of a `ContextShift` in order to know which thread pool to run the fiber on. 
 
-Basically, this is what a fiber really is under the hood - it's a *continuation* with a *scheduler*. 
 
-- Continuation is a stack of function calls that can be stopped and stored in the heap at some point (with yield) and restarted afterward (with run), and we just saw how we can build up the continuation as a series of flatmapped instructions wrapped in a `IO`. 
+Basically, this is what a fiber really is under the hood - it's a *continuation* (set of chained instructions) with a *scheduler* (in this case, `ContextShift`). 
 
-- Scheduler schedules fibers on a thread pool so that the execution of fiber's code can be carried by multiple worker threads. Once we do `.start` on an `IO`, we start it in a separate fiber and scheduler schedules it on the thread pool. In cats-effect, role of the scheduler is performed by `ContextShift`, which uses the underlying `ExecutionContext`.
+Let's explain this further:
+
+- Continuation is a stack of function calls that can be stopped and stored in the heap at some point (with yield) and restarted afterward (with run). We have just seen how we can build up the continuation as a series of flatmapped instructions wrapped in an `IO`. 
+
+- Scheduler schedules fibers on a thread pool so that the execution of fiber's code can be carried by multiple worker threads. Once we do `.start` on an `IO`, we start it on a separate fiber, and scheduler schedules it on the thread pool. In Cats-Effect, role of the scheduler is performed by `ContextShift`, which uses the underlying Scala `ExecutionContext`.
 
 ### Run loop
 
-Each fiber is associated with a *run loop* that executes the instructions from the source one by one. 
+Each fiber is associated with a *run loop* that executes the instructions from the source (that is, from the continuation) one by one. 
 
 Run loop needs access to two JVM resources:
 - execution context (forking & yielding)
 - scheduled executor service (sleeping before getting submitted again)
 
-Run loop builds up a stack of tasks to be performed. We could model the stack in Scala code like this:
+Run loop builds up a stack of tasks to be performed. 
+We could model the stack in Scala code like this:
 
 ```
 sealed trait IO[+A]
@@ -568,7 +575,7 @@ val program = for {
 } yield ExitCode.Success
 ```
 
-Run loop stack for the program above would then look like this:
+Run loop stack for that program would then look something like this:
 ```
 FlatMap(
   FlatMap(
@@ -578,22 +585,23 @@ FlatMap(
   input => Delay(() => println(s"Ah, $input is up!"))
 )
 ```
-([here](https://github.com/typelevel/cats-effect/blob/master/core/shared/src/main/scala/cats/effect/internals/IORunLoop.scala) is the link to the actual cats-effect `IO` run loop)
+([here](https://github.com/typelevel/cats-effect/blob/master/core/shared/src/main/scala/cats/effect/internals/IORunLoop.scala) is the link to the actual Cats-Effect `IO` run loop)
 
-When the program is run (at the "end of the world", in our case using `unsafeRunSync()`), the stack is submitted to the scheduler. Is it submitted all at once? Or is it submitting one layer of FlatMap at a time, each time yielding back when the task is completed, allowing other fibers to run? 
+When the program is run at the "end of the world", the stack is submitted to the scheduler. 
+Is it submitted all at once? Or is it submitting one layer of FlatMap at a time, each time yielding back when the task is completed, allowing other fibers to run? 
 
 Actually, this is up to the library / construct being used:
 
 - Scala Future: Yields back on every `FlatMap`
 - IO: Yields back when the whole stack is completed
-- Monix Task: Yields back every N operations (at the moment of writing this, I believe N = 1024).
+- Monix Task: Yields back every N operations (at the moment of writing this, I believe N = 1024 by default, but don't take my word for it).
 
 This means that Scala `Future` optimizes for fairness, `IO` for throughput, and `Monix` takes the middle approach. 
-Note that we could prevent Future from yielding all the time by using a non-shifting instance of `ExecutionContext`, and we could force `IO` to shift manually when we want it to. 
+Note that it's not impossible to turn things the other way around: we could prevent `Future` from yielding all the time (and thus optimize for throughput) by using a non-shifting instance of `ExecutionContext`, and we could manually force `IO` to shift after every operation (thus optimizing for fairness).
 
-You can think of Scala Future as being "fairness opt-out" and IO "fairness opt-in".
+You can think of `Future` as "fairness opt-out" and `IO` as "fairness opt-in".
 
-Quick side note: When a cancellation command has been issued for some running `IO`, it can only be cancelled at two particular points, and one such point is inserted by the library on every 512 flatMaps in the run loop stack. 
+Note on cancellation inside the run-loop: when a cancellation command has been issued for some running `IO`, it can only be cancelled at two particular points, and one such point is inserted by the library on every 512 flatMaps in the run loop stack. 
 The other one is at the asynchronous boundary (see [Context shift](#context-shift) section).
 
 ### Cooperative yielding
@@ -604,19 +612,19 @@ The relationship between fibers and threads is the following:
 - It is possible to have one fiber switching between multiple threads
 - Usually, you will want to have M to N mapping (M = fibers, N = threads), with M > N
 - Whenever multiple fibers need to compete for the same thread, they will cooperatively yield to each other, thus allowing each fiber to run a bit of its work and then allow some other fiber to take the thread
-- How often and at which point the fiber yields depends on the underlying implementation; in cats-effect, it won't yield until you tell it to, which allows fine-tuning between fairness and throughput
+- How often and at which point fiber yields depends on the underlying implementation; in Cats-Effect, it won't yield until you tell it to, which allows fine-tuning between fairness and throughput
 
-Because the number of fibers is usually higher than the number of threads in the given thread pool, fibers yield control to each other in order to make sure that all fibers get their piece of the CPU time. 
+Because the number of fibers is usually higher than the number of threads in a given thread pool, fibers need to yield control to each other in order to make sure that all fibers get their piece of the CPU time. 
 For example, in a pool with two threads that's running three fibers, one fiber will be waiting at any given point. 
 
-In cats-effect 2, cooperative yielding is controlled via `ContextShift`. 
+In Cats-Effect 2, cooperative yielding is controlled via `ContextShift`.
 
 ### ContextShift
 
-Note that `ContextShift` is most likely going to be removed in cats-effect 3; see [cats-effect 3](#cats-effect-3) section.
-However, core principles explained here are useful to understand, because they will still be relevant in the next version)
+Note that `ContextShift` is most likely going to be removed in Cats-Effect 3; see [Cats-Effect 3](#cats-effect-3) section.
+However, core principles explained here are useful to understand, because they will still be relevant in the next version.
 
-In cats-effect, submitting the fiber to a thread pool is done via `ContextShift` type. 
+In Cats-Effect, submitting the fiber to a thread pool is done via `ContextShift` construct. 
 It has two main abilities: to run the continuation on some `ExecutionContext`, and to shift it to a different `ExecutionContext`.
 
 Here's the trait:
@@ -628,10 +636,10 @@ trait ContextShift[F[_]] {
 }
 ```
 
-You can think of it as a type class, even though it is not really a valid type class because it doesn't have the coherence restriction - a type can implement a type class in more than one way. For example, you might want to have a bunch of instances of `ContextShift[IO]` lying around, each constructed using a different `ExecutionContext` and representing a different thread pool (one for blocking I/O, one for CPU-heavy stuff, etc.). As mentioned earlier, constructing an instance of `ContextShift[IO]` is easy: `val cs = IO.contextShift(executionContext)`.
+You can think of it as a type class, even though it is not really a valid type class because it doesn't have the coherence restriction - a type can implement a type class in more than one way. For example, you might want to have a bunch of instances of `ContextShift[IO]` lying around, each constructed using a different `ExecutionContext` and representing a different thread pool (one for blocking I/O, one for CPU-heavy stuff, etc.). Constructing an instance of `ContextShift[IO]` is easy: `val cs = IO.contextShift(executionContext)`.
 
 Method `shift` is how we achieve fairness. 
-Every fiber will be executed synchronously until shifted, at which point other fibers have the chance to advance their work. 
+Every fiber will be executed synchronously until shifted, at which point other fibers will have the chance to advance their work. 
 
 Don't confuse `shift` from `ContextShift` with `IO.shift`. 
 The semantics are the same, but they come in slightly different forms. 
@@ -649,7 +657,7 @@ Note that you can simply provide the same `ContextShift` / `ExecutionContext` th
 
 So, just to repeat, `ContextShift` can perform a "shift" which either moves the computation to a different thread pool or sends it to the current one for re-scheduling.
 Point at which the shift happens is often referred to as *asynchronous boundary*. 
-Concept of asynchronous boundary has been described in the [Asynchronous boundary](#asynchronous-boundary) section, and now it has been re-introduced in the cats-effect context.
+Concept of asynchronous boundary has been described in the [Asynchronous boundary](#asynchronous-boundary) section, and now it has been revisited in the Cats-Effect context.
 
 Asynchronous boundary is one of two places at which an `IO` can be cancelled (the other one is every 512 flatMaps in the run loop; see the [Run loop](#run-loop) section).
 
@@ -657,9 +665,12 @@ Asynchronous boundary is one of two places at which an `IO` can be cancelled (th
 
 Method `shift` will be demonstrated on two examples.
 
+#### Example 1: Single pool
+
 First, we will use a thread pool with only one thread, and we will start two fibers on that thread. 
 Note that I'm removing some boilerplate to save space (`IOApp` etc.), but you can find the full code in the repository.
 Also note that `Executors.newSingleThreadExecutor` and `Executors.newFixedThreadPool(1)` are two alternative ways of declaring the same thing. I will use the latter, simply to keep the consistency with examples that use multi-threaded pools.
+
 ```
 val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 val cs: ContextShift[IO] = IO.contextShift(ec)
@@ -676,7 +687,7 @@ val program = for {
   _ <- loop("B")(0).start(cs)
 } yield ExitCode.Success
 ```
-where `printThread` is a printline statement that includes the thread identifier, for extra clarity:
+Method `printThread` is a printline statement that includes the thread identifier for extra clarity:
 ```
 def printThread(id: String) = {
   val thread = Thread.currentThread.getName
@@ -684,11 +695,11 @@ def printThread(id: String) = {
 }
 ```
 
-Code is pretty straightforward - we have a recursive loop that goes on forever, and all it does is print out some ID (e.g. "A" or "B"). 
+Code is pretty straightforward - we have a recursive loop that goes on forever, and all it does is print out some ID ("A" or "B"). 
 
-What gets printed out is an endless stream of "A", because first fiber never shifts (that is, never cooperatively yields) and the second fiber never gets a chance to be run.
+What gets printed out when we run the above program is an endless stream of "A", because first fiber never shifts (that is, never cooperatively yields) so the second fiber never gets a chance to run.
 
-Now let's add the shifting to the above code snippet:
+Now let's add the shifting part to the above code snippet:
 ```
 def loop(id: String)(i: Int): IO[Unit] = for {
   _ <- IO(printThread(id))
@@ -699,7 +710,7 @@ def loop(id: String)(i: Int): IO[Unit] = for {
 
 What gets printed out in this case is an alternating sequence of "A"s and "B"s:
 ```
-[pool-1-thread-1] A
+...
 [pool-1-thread-1] A
 [pool-1-thread-1] B
 [pool-1-thread-1] A
@@ -709,9 +720,32 @@ What gets printed out in this case is an alternating sequence of "A"s and "B"s:
 ```
 
 Even though we have only one thread, there are two fibers running on it, and by telling them to `shift` after every iteration, they can work cooperatively together. 
-At any given point only one fiber is running on the thread, but soon afterward it backs away from the thread and gives the opportunity to the other fiber to run on the same thread.
+At any given point only one fiber is running on the thread, but soon it backs away and gives the other fiber an opportunity to run on the same thread.
 
-In the second example, we will have the same two fibers, but this time each fiber will get its own single thread.
+Before we move on, let's see what happens if we run this example without spawning any separate fibers, but we keep the `shift` inside the loop. So basically we just remove the `start` parts:
+```
+val program = for {
+  _ <- loop("A")(0) // .start(cs)
+  _ <- loop("B")(0) // .start(cs)
+} yield ExitCode.Success
+```
+What we get is:
+```
+[ioapp-compute-0] A
+[pool-1-thread-1] A
+[pool-1-thread-1] A
+[pool-1-thread-1] A
+...
+```
+The program started looping on "A" on the default main thread, and "B" never got its chance to run. 
+After the first loop cycle, "A" was then shifted to the thread pool defined by `cs`. 
+Each subsequent shift had the effect of yielding within the same thread, but it had no visible effect in this case, because there are no other fibers competing for the thread. 
+But don't forget - we still did introduce an asynchronous boundaries with every `shift` though. 
+So even if there's only one fiber running on the thread pool, that doesn't mean that `shifting` on that thread pool has no consequences (for example, every time we `shift` we set a checkpoint at which cancellation can happen if requested, as explained in the [ContextShift](#contextshift) section).
+
+#### Example 2: Two pools
+
+In the second example, we will have the same two fibers, but this time each fiber will get its own thread pool with a single thread.
 
 ```
 val ec1 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
@@ -743,10 +777,10 @@ We get:
 ...
 ```
 
-So this time each fiber has the opportunity to run, because they are running each on its own thread (it's the operating system's job to make sure the CPU runs a little bit of each thread all the time). 
-We would observe the same behaviour if we had used a single pool with two threads, e.g. `Executors.newFixedThreadPool(2)` (try it out!). 
+This time each fiber has the opportunity to run, because each is running on its own thread (it's the operating system's job to make sure the CPU runs a little bit of each thread all the time). 
+We would have observed the same behaviour if we had used a single pool with two threads, e.g. `Executors.newFixedThreadPool(2)` (try it out!). 
 
-Now, pay attention to the shift that happens on 10th iteration:
+Now, pay attention to the shift that happens on the 10th iteration:
 
 ```
 ...
@@ -754,28 +788,28 @@ Now, pay attention to the shift that happens on 10th iteration:
 ...
 ```
 
-At the 10th iteration of the loop, each `IO`s will shift to thread pool number one. This means that, at that point, both fibers are going to get scheduled on the same single thread from that pool, and there will be no subsequent `shifts`. So soon after initial "ABAB..." we will suddenly stop seeing "B"s:
+At the 10th iteration of the loop, each `IO` will shift to thread pool number one. At that point, both fibers are going to get scheduled on the same thread (the only one in that pool), and there will be no subsequent `shifts`. 
+So soon after initial "ABAB..." we will suddenly stop seeing "B"s:
 ```
-[pool-1-thread-1] A
+...
 [pool-2-thread-1] B
 [pool-1-thread-1] A
 [pool-2-thread-1] B
-[pool-1-thread-1] A
 [pool-1-thread-1] A
 [pool-1-thread-1] A
 [pool-1-thread-1] A
 ...
 ```
  
-If we would keep shifting (e.g. by saying `i > 10` instead of `i == 10`), we would keep getting "A"s and "B"s interchangeably like we have so far. 
+If we would keep shifting now (e.g. by saying `i > 10` instead of `i == 10`), we would keep getting "A"s and "B"s interchangeably like we have so far. 
 But we only shifted once, both loops to the same `ContextShift` (that is, to the same single threaded thread pool), and we stopped shifting at that point. 
-So both fibers ended up stuck on a single threaded thread pool, and without further shifts, the other one will starve to death.
+So both fibers ended up stuck on a single thread, and without further shifts, one of them will starve.
 
 ### IO vs Future
 
 What do you think happens if we swap `IO` for a `Future` in the cases we saw earlier?
 
-Let's start with the single thread example:
+Let's start with the single threaded example:
 
 ``````
 implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
@@ -802,7 +836,7 @@ Await.result(program, Duration.Inf)
 As expected, this prints out `[pool-1-thread-1] A` indefinitely.
 
 But what happens if we now change to `Executors.newFixedThreadPool(2)`?
-In the case of fibers, both "A" and "B" would be executed concurrently. 
+In the case of fibers, "A" and "B" would be executed concurrently, and we would see them taking turns in being printed out. 
 
 But with `Future`s, we get 
 ```
@@ -813,16 +847,15 @@ But with `Future`s, we get
 [pool-1-thread-2] A
 [pool-1-thread-1] A
 ```
-Note how threads are taking turns, but both are executing "A".
+Note how threads are still taking turns, but they are both are executing "A".
 
 Why does this happen?
 
-On every `flatMap` call (`map` too), `Future` needs to have access to the `ExecutionContext`. 
-Its signature is literally:
+On every `flatMap` call (`map` too), `Future` needs to have access to the `ExecutionContext`:
 ```
 def flatMap[S](f: T => Future[S])(implicit executor: ExecutionContext): Future[S]
 ```
-So in every step of the for-comprehension, `Future` will dispatch its computation back to our two-threaded pool (note: I heard that implementation of `Future` might change in this regard and that calls to `ExecutionContext` are going to be "batched" to improve performance, but I couldn't find any official source for this at the time of writing). 
+In every step of the for-comprehension, `Future` will dispatch its computation back to our two-threaded pool (note: I heard that implementation of `Future` might change in this regard and that calls to `ExecutionContext` are going to be "batched" to improve performance, but I couldn't find any official source for this at the time of writing). 
 
 This explains why we see alternating threads taking turns in computing "A".
 
@@ -833,16 +866,10 @@ Then, once we executed the full program, we observed the behaviour of two fibers
 
 But with `Future`s, there is no concept of a fiber. 
 This means that, instead of defining two separate fibers in our two-step for-comprehension, we simply defined a chain of two computations, both being infinitely recursive.
-So what happens is that loop "A" runs indefinitely, forever calling itself recursively, and our code never even gets to the loop "B". But on each recursive call of the "A" loop, underlying `ExecutionContext` delegates the computation to one of the two available threads, which is why we saw them alternating.
+So what happens is that loop "A" runs indefinitely, forever calling itself recursively, and our code never even gets the chance to run the loop "B". 
+But on each recursive call of the "A" loop, underlying `ExecutionContext` delegates the computation to one of the two available threads, which is why we saw the threads alternating.
 
-Note that we would have observed the same behaviour using `IO` if we hadn't started the two loops on separate fibers:
-```
-val program = for {
-  _ <- loop("A")(0) // .start(cs)
-  _ <- loop("B")(0) // .start(cs)
-} yield ExitCode.Success
-```
-Homework: Try to run the example without `.start`, that is, without spawning any separate fibers, but keep the `shift` inside the loop. What happens? What gets printed out?
+Note that we would have observed the same behaviour using `IO` if we hadn't started the loops on separate fibers using `.start`.
 
 ### Leaking fibers
 
@@ -867,7 +894,8 @@ val program = (f1, f2).parMapN {
 }
 ```
 
-In the above example, we will not only never see "Joined f2", but we will also never see "Joined f1". Fiber `f1` will leak.
+In the above example, not only will we never see "Joined f2", but we will also never see "Joined f1". 
+Fiber `f2` will explode and fiber `f1` will leak.
 
 Fibers should therefore always be used within a safe allocation mechanism, otherwise they might leak resources when cancelled.
 In the [Resource handling](#resource-handling) section, one such mechanism has been shown, using the `Resource` construct. 
@@ -886,48 +914,48 @@ val program = (r1.use(_.join), r2.use(_.join)).parMapN {
 }
 ```
 
-This time you will notice both the "Joined 1" and "Joined 2" printout, which means that both fibers got joined and didn't leak.
+This time you will notice that both "Joined 1" and "Joined 2" got printed out, which means that both fibers got joined and didn't leak.
 
 ### Summary
 
-Type class `ContextShift` gives us the ability to execute an effect on some desired thread pool via `evalOn` by providing the corresponding `ExecutionContext`, or to `shift`, which re-schedules the fiber in the current thread pool and enables cooperative yielding. 
+Type class `ContextShift` gives us the ability to execute an effect on some desired thread pool via `evalOn` by providing the `ExecutionContext`, or to `shift`, which re-schedules the fiber in the current thread pool and enables cooperative yielding. 
 
 We get the same two abilities in `IO`, but in that case `shift` takes the thread pool as a parameter, either as `ExecutionContext` or (implicit) `ContextShift`. 
-This means that we can cooperatively yield to another fiber within the same thread pool by passing the reference to the current one, and we can also shift to a different one.
+This means that we can cooperatively yield to another fiber within the same thread pool by passing the reference to the current one, and we can also shift to a different one. In other words, `IO.shift` provides both the type class `shift` functionality, and the type class `evalOn` functionality.
 
-In the case of `Future`, there are no fibers. We pass an `ExecutionContext` to each map / flatMap call, which means that every `Future` computation might be executed on a different thread (this is up to the passed `ExecutionContext` and how it decides to schedule the work).
+In case of `Future`, there are no fibers. We pass an `ExecutionContext` to each map / flatMap call, which means that every `Future` computation might be executed on a different thread (this is up to the passed `ExecutionContext` and how it decides to schedule the work).
 What we cannot do with `Future`s, however, is define two concurrent computations that will reuse the same thread cooperatively.
 
-## Cats-effect 3
+## Cats-Effect 3
 
-At the time of writing this text, cats-effect 3 was still in the [proposal](https://github.com/typelevel/cats-effect/issues/634) phase.
+At the time of writing this text, Cats-Effect 3 was still in the [proposal](https://github.com/typelevel/cats-effect/issues/634) phase.
 
 Here are some important changes that are happening (there are many more, but I'm focusing on those that directly affect the things explained in this text):
 
 1.  `ContextShift` is being removed.
 
-    Even though cats-effect 3 still isn't out, the decision to remove `ContextShift` has already been made.
+    Even though Cats-Effect 3 still isn't out, the decision to remove `ContextShift` has already been made.
 But that doesn't mean that the principles explained in the previous couple of sections are becoming deprecated and irrelevant.
 
     First of all, `evalOn` will still exist; we need the ability to run a fiber on a given thread pool. 
 It will simply take `ExecutionContext` as a parameter instead of `ContextShift`.
-However, it's now being constrained in a way that it will move all of the actions to the given thread pool, reverting back to the enclosing thread pool when finished (as opposed to cats-effect 2 which reverts back to the default pool). 
+However, it's now being constrained in a way that it will move all of the actions to the given thread pool, reverting back to the enclosing thread pool when finished (as opposed to Cats-Effect 2 which reverts back to the default pool). 
 This is explained further in point 3.
 
 2.  Method `shift` is being removed.
 
-    In cats-effect 2, method `shift` has two main roles:
+    In Cats-Effect 2, method `shift` has two main roles:
     - shifting to a desired thread pool, which will be done by `Async#evalOn` described in the previous point
     - cooperative yielding, which will be done by `yield` / `yielding` / `cede` / `pass` / whatever name is eventually agreed upon, and which will be part of the `Concurrent` type class (this method will actually be a bit more general, but that's more of an implementation detail).
 
     Note that this means removing `shift` from three different places:
-    - `ContextShift#shift` is being removed completely (see point 1)
-    - `Async#shift(executionContext)` is being replaced by `Async[F[_]]#evalOn(f, executionContext)` (note that the former is the companion object, while the latter is the type class)
-    - `IO#shift(executionContext)` and `IO#shift(contextShift)` are being replaced by `Async[IO]#evalOn(executionContext)` (although there might be an `IO#evalOn(executionContext)` for convenience)
+    - `ContextShift.shift` is being removed completely (see point 1)
+    - `Async.shift(executionContext)` is being replaced by `Async[F[_]].evalOn(f, executionContext)` (note that the former is the companion object, while the latter is the type class; I omitted the "implicitly", you get the point)
+    - `IO.shift(executionContext)` and `IO.shift(contextShift)` are being replaced by `Async[IO].evalOn(executionContext)` (although there might be an `IO.evalOn(executionContext)` for convenience)
 
 3. `Async` type class will now hold a reference to the running `ExecutionContext`.
 This will enable fallback to the parent `ExecutionContext` once a fiber has terminated. 
-Consider the following cats-effect 2 code:
+Consider the following Cats-Effect 2 code:
     ```
     val ec1 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
     val ec2 = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
@@ -953,13 +981,13 @@ Thread pools are defined as follows:
     The million dollar question is - which thread pool does "B2" run on?
 Answer: on `ec1`. This is very unintuitive. It would feel more natural if, after finishing "B1" on `ec2`, the follow-up "B2" would run on whatever "A" was running on. Instead, we fall back all the way to the default `ExecutionContext` that our `ContextShift` was initialised with.
 
-    In cats-effect 3, this will be fixed.
+    In Cats-Effect 3, this will be fixed.
 
 ## Fibers outside of Scala
 
 ### Project Loom
 
-Working with concurrent effects that has been described so far relies on the concept of fibers implemented by Scala libraries such as cats-effect, ZIO and Monix. 
+Working with concurrent effects that has been described so far relies on the concept of fibers implemented by Scala libraries such as Cats-Effect, ZIO and Monix. 
 There is an initiative, however, to move the fibers from custom library Scala code to the virtual machine itself. 
 
 [Project Loom](https://cr.openjdk.java.net/~rpressler/loom/Loom-Proposal.html) is a proposal for adding fibers to the JVM. This way, fibers would become native-level constructs which would exist on the call stack instead of as objects on the heap.
