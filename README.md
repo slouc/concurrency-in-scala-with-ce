@@ -25,6 +25,7 @@ All code snippets are based on Cats-Effect 2, since Cats-Effect 3 wasn't yet out
   - [Resource handling](#resource-handling)
 - [Fibers](#fibers)
   - [Definition](#definition)
+  - [Fibers in the code](#fibers-in-the-code)
   - [Continuations](#continuations)
   - [Run loop](#run-loop)
   - [Cooperative yielding](#cooperative-yielding)
@@ -442,27 +443,51 @@ For more details on resource handling in Cats-Effect, refer to this [excellent b
 
 ## Fibers
 
+
 ### Definition
 
-You can think of fibers as lightweight threads which use cooperative scheduling, unlike real (OS and JVM) threads which use preemptive scheduling. 
-
-Also, fibers are managed in the user space, whereas real threads are managed in the kernel space.
+You can think of fibers as lightweight threads which use cooperative scheduling, unlike actual threads which use preemptive scheduling. 
 
 Note that in some contexts / languages fibers are also known as *coroutines*; "fiber" is usually used in the system-level context, while coroutines are used in the language-level context. 
 However, in Scala "fiber" is the preferred term.
 
-Fibers map to CPU / JVM threads many-to-few, similarly to how threads map to processes. 
-Multiple fibers can run on multiple thread pools, or on the same set of threads from one thread pool, or even on the same thread.
-In the case of a single thread, they will take turns executing their code using the available thread. 
-Depending on your code, as well as the library that you are using, you can decide to have them cooperate more often, thus achieving fairness, or to cooperate less often, thus sacrificing some fairness for more throughput (concepts of fairness and throughput have been [introduced earlier](#threads-and-thread-pools)).
+Unlike OS and JVM threads which are managed in the kernel space, fibers are managed in the user space.
+In other words, fibers are a made-up construct that lives on the heap because we bring it to life in our own code (well, library code - see next section).
 
-As mentioned earlier, fibers are lightweight: they consume much less memory than real threads, have growable and shrinkable stacks, and can be garbage collected. 
-Also, blocking a fiber doesn't block the underlying thread.
-As a consequence of all that, we don't have to be as careful when creating new fibers.
-On the other hand, when using threads, we're primarily constrained by the number of cores (but also other aspects).
+As a mental model, it's useful to think of fibers as a yet another level of abstraction above threads:
 
-I want to explicitly point out that fiber in Scala is a **concept**, not some native resource like process or thread. Project [Loom](https://wiki.openjdk.java.net/display/loom/Main) (also see this [blogpost](https://blog.softwaremill.com/will-project-loom-obliterate-java-futures-fb1a28508232?gi=c5487dba95ec)) aims to introduce fibers as native JVM constructs, but in Cats-Effect and other libraries fibers are a manually-implemented thing. 
-This also means that there might be some minor differences in implementation across those libraries (e.g. compare [Cats-Effect](https://typelevel.org/cats-effect/datatypes/fiber.html) with [ZIO](https://zio.dev/docs/overview/overview_basic_concurrency#fibers)).
+```
+Fibers
+-------
+Threads
+-------
+CPU
+```
+
+Fibers map to threads many-to-few, same as how threads map to CPU cores. 
+
+There is one important difference and one important similarity when it comes to these two layers of abstraction (fibers on threads vs threads on CPU).
+
+Difference: 
+
+As mentioned [earlier](#scheduling-and-executioncontext), threads are scheduled on the CPU *preemptively*, whereas fibers are scheduled on threads *cooperatively* 
+
+Similarity: 
+
+**Blocking on one level means de-scheduling on the level below**. This is a very powerful insight. 
+CPU doesn't know anything about blocking; it just keeps running threads in circles. 
+What we call a "blocked thread" is simply, from CPU's perspective, a thread that got de-scheduled and will be run again later at some point.
+Same principle becomes even more important on the layer above, because it makes us realise that blocking a fiber doesn't block the underlying thread.
+Blocking a fiber simply means it will step aside, yielding its thread to other fibers, and wait until it's scheduled again.
+Threads are a system resource and we should try not to block them, but when it comes to fibers - block away!
+
+Depending on your code, as well as the library that you are using, you can decide to have your fibers cooperate more often, thus achieving fairness, or to cooperate less often, thus sacrificing some fairness for more throughput (concepts of fairness and throughput have been [introduced earlier](#threads-and-thread-pools)).
+
+### Fibers in the code
+
+I want to explicitly point out that fiber in Scala is a **made-up, custom construct**, not some native resource like process or thread. 
+Project [Loom](https://wiki.openjdk.java.net/display/loom/Main) (also see this [blogpost](https://blog.softwaremill.com/will-project-loom-obliterate-java-futures-fb1a28508232?gi=c5487dba95ec)) is aiming to introduce fibers as native JVM constructs, but until that happens, fibers in Scala will continue to be a manually-implemented thing. 
+This also means that they might have some minor differences in implementation across different libraries (e.g. [cats-effect](https://typelevel.org/cats-effect/datatypes/fiber.html) vs [ZIO](https://zio.dev/docs/overview/overview_basic_concurrency)).
 
 Let's see some code: in Cats-Effect, fiber is a construct with `cancel` and `join`:
 ```scala
