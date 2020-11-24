@@ -42,29 +42,33 @@ All code snippets are based on Cats-Effect 2, since Cats-Effect 3 wasn't yet out
 
 ## Introduction
 
-First, some useful definitions and descriptions:
+First, let's see some useful definitions in the context of threads:
   
 - Blocking:  
-  Thread that executes a blocking task will wait on action until success or failure.
+  Thread is put to sleep and resumed later (e.g. until mutex is released).
   
 - Non-blocking:  
-  Thread that executes a non-blocking task will initiate it and immediately continue with another task without waiting. When the first task is done, its result may or may not be processed by the same thread that initiated it.
+  Opposite of blocking - no threads are being put to sleep.
   
 - Synchronous:  
-  Thread will complete the task, either by success or failure, before reaching any line after it. This often involves blocking, because task N+1 cannot continue until task N has finished, which might include waiting for the result from another thread.
+  Thread completes the task, either by success or failure, before reaching any task after it. 
   
 - Asynchronous:  
-  Task was started by one thread, but another thread (either logical or physical) will complete the task, and then return the result using a callback. Task N+1 can continue even if N hasn't finished yet.
+  Thread starts some task T and offloads it to another thread, which allows it to immediately proceed with task T+1 before T finishes.
 
 - Concurrency:  
-  State in which there are multiple logical threads of control, whose tasks are interleaved.
+  State in which multiple threads have their tasks interleaved.
   
 - Parallelism:  
-  State in which computations are physically performed in parallel on separate CPU cores.
+  State in which multiple threads run simultaneously.
 
 Note that concurrency isn't the same as parallelism: we could have concurrency without parallelism (effects are interleaved, but everything is done by one single CPU core), and we could have parallelism without concurrency (multiple cores are running multiple standalone threads that don't interleave). In this text, we are interested in the concurrent aspect of our programs, and we don't care whether some of the tasks are done in parallel or not.
 
-Also, there seems to be a lot of confusion around blocking vs synchronous and non-blocking vs asynchronous. Some sources (especially ones related to NodeJS) often assume synchronous = blocking and asynchronous = non-blocking, while other sources point out that blocking is always synchronous, but synchronous doesn't always mean blocking (spinlock mechanisms etc.). For all intents and purposes, this text assumes that all synchronous tasks are blocking, and all asynchronous tasks are non-blocking. 
+Also, there seems to be a lot of confusion around blocking vs synchronous and non-blocking vs asynchronous. This confusion mainly comes from the fact that some people use "blocking" in the context of application code, in which case it's indeed pretty much the same thing as "synchronous". However, "blocking" can also have completely different semantics - it can mean that a thread is put in a `BLOCKED` state (one of six available thread states on the JVM). If that's what you consider to be "blocking" - a physical system property rather than a conceptual one like "synchrornous" - then the difference becomes quite visible.
+
+For example, spinlock is a mechanism that serves as an alternative to mutex. It ensures that a thread cannot acquire some resource until it's been released by the thread that's currenlty using it. So, this system is synchronous, but it's not blocking - instead of being put into blocked state, the thread is kept alive spinning forever in a loop, constantly polling for the resource until it's released. If you're working on the operating system level, this makes a huge difference - spinlock doesn't need the heavy context switching required for scheduling / descheduling a thread, but it hogs the CPU and is therefore only used for short time periods. However, to us application code writers it doesn't honestly make a big difference. We know that a "blocked thread" cannot be used to perform some useful work and for all we care it's sitting around wasted until it's unblocked.
+
+This text doesn't dive into low level details where blocking vs synchronous makes a difference. Semantics of "blocking a task" are "current task has to finish before any subsequent task can start", which is the same thing as "synchronous". In the same fashion, for all intents and purposes, "non-blocking" is the same thing as "asynchronous".
 
 ## Asynchronous boundary
 
