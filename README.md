@@ -699,7 +699,7 @@ Method `shift` will be demonstrated on two examples.
 First, we will use a thread pool with only one thread, and we will start two fibers on that thread. 
 Note that I'm removing some boilerplate to save space (`IOApp` etc.), but you can find the full code in the repository.
 Also note that `Executors.newSingleThreadExecutor` and `Executors.newFixedThreadPool(1)` are two alternative ways of declaring the same thing. I will use the latter, simply to keep the consistency with examples that use multi-threaded pools.
-```
+```scala
 val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
 val cs: ContextShift[IO] = IO.contextShift(ec)
 
@@ -716,7 +716,7 @@ val program = for {
 } yield ExitCode.Success
 ```
 Method `printThread` is a printline statement that includes the thread identifier for extra clarity:
-```
+```scala
 def printThread(id: String) = {
   val thread = Thread.currentThread.getName
   println(s"[$thread] $id")
@@ -751,7 +751,7 @@ Even though we have only one thread, there are two fibers running on it, and by 
 At any given point only one fiber is running on the thread, but soon it backs away and gives the other fiber an opportunity to run on the same thread.
 
 Before we move on, let's see what happens if we run this example without spawning any separate fibers, but we keep the `shift` inside the loop. So basically we just remove the `start` parts:
-```
+```scala
 val program = for {
   _ <- loop("A")(0) // .start(cs)
   _ <- loop("B")(0) // .start(cs)
