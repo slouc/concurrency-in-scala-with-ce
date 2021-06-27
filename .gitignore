@@ -1,0 +1,46 @@
+
+# Created by https://www.toptal.com/developers/gitignore/api/metals,scala,sbt,bloop,visualstudiocode,intellij
+# Edit at https://www.toptal.com/developers/gitignore?templates=metals,scala,sbt,bloop,visualstudiocode,intellij
+
+### Bloop ###
+.bloop/
+
+### Intellij ###
+# Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio, WebStorm and Rider
+# Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
+
+# User-specific stuff
+.idea
+
+### Metals ###
+.metals/
+project/**/metals.sbt
+
+### SBT ###
+# Simple Build Tool
+# http://www.scala-sbt.org/release/docs/Getting-Started/Directories.html#configuring-version-control
+
+dist/*
+target/
+lib_managed/
+src_managed/
+project/project
+project/boot/
+project/plugins/project/
+.history
+.cache
+.lib/
+.bsp
+
+### Scala ###
+*.class
+*.log
+
+### VisualStudioCode ###
+.vscode
+
+### VisualStudioCode Patch ###
+# Ignore all local history of files
+.ionide
+
+# End of https://www.toptal.com/developers/gitignore/api/metals,scala,sbt,bloop,visualstudiocode,intellij
