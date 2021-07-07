@@ -575,7 +575,7 @@ Let's explain this further:
 
 - Continuation is a stack of function calls that can be stopped and stored in the heap at some point (with yield) and restarted afterward (with run). We have just seen how we can build up the continuation as a series of flatmapped instructions wrapped in an `IO`. 
 
-- Scheduler schedules fibers on a thread pool so that the execution of fiber's code can be carried by multiple worker threads. Once we do `.start` on an `IO`, we start it on a separate fiber, and scheduler schedules it on the thread pool. In Cats-Effect, role of the scheduler is performed by `ContextShift`, which uses the underlying Scala `ExecutionContext`.
+- Scheduler schedules fibers on a thread pool so that the execution of fiber's code can be carried by multiple worker threads. Once we do `.start` on an `IO`, we start it on a separate fiber, and scheduler schedules it on the thread pool. In Cats-Effect, the role of the scheduler is performed by `ContextShift`, which uses the underlying Scala `ExecutionContext`.
 
 ### Run loop
 
